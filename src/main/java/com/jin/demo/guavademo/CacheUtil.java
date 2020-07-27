@@ -10,6 +10,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -32,7 +33,9 @@ public class CacheUtil {
 
     @PostConstruct
     public void init(){
-        cache = CacheBuilder.newBuilder().build(new CacheLoader<String, Object>() {
+        cache = CacheBuilder.newBuilder()
+                .expireAfterAccess(60,TimeUnit.SECONDS)
+                .build(new CacheLoader<String, Object>() {
             //读取数据源
             @Override
             public Object load(String s) throws Exception {
@@ -65,7 +68,25 @@ public class CacheUtil {
 
     public User getUserById(String id) {
         try {
-            return (User) cache.get(id);
+            return (User) cache.get(id, new Callable<User>() {
+                @Override
+                public User call() throws Exception {
+                    //添加分布式锁，防止缓存击穿
+                    RLock lock = redissonClient.getLock(id);
+                    lock.lock();
+                    //先从redis中找
+                    User o = (User) redisTemplate.opsForValue().get(id);
+                    if (null != o) {
+                        return o;
+                    }
+                    //如果找不到，再去mysql
+                    User user = userDao.findById(Integer.parseInt(id)).get();
+                    redisTemplate.opsForValue().set(id,user,60, TimeUnit.SECONDS);
+                    //释放锁
+                    lock.unlock();
+                    return user;
+                }
+            });
         } catch (ExecutionException e) {
             e.printStackTrace();
         }
