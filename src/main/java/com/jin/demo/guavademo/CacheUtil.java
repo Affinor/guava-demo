@@ -34,7 +34,7 @@ public class CacheUtil {
     @PostConstruct
     public void init(){
         cache = CacheBuilder.newBuilder()
-                .expireAfterAccess(60,TimeUnit.SECONDS)
+                .expireAfterWrite(60,TimeUnit.SECONDS)
                 .build(new CacheLoader<String, Object>() {
             //读取数据源
             @Override
